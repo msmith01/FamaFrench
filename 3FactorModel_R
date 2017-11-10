@@ -1,0 +1,89 @@
+rm(list = ls())
+
+library(quantmod)
+setwd('Set your Working Directory')
+
+#Download stock data (from the quantmod package)
+GOOG <- getSymbols("GOOG", src="yahoo", periodicity = "monthly", from="2011-12-31", to = "2016-12-31", auto.assign = FALSE, adjust = TRUE)
+colnames(GOOG) <- c("Open", "High", "Low", "Close", "Volume", "Adj")
+
+#Calculate monthly return
+GOOG$Returns <- diff(log(GOOG$Adj))
+
+
+#Drop first N rows so dates align
+N <- 2
+GOOG <- GOOG[-(1:N), , drop = FALSE]
+
+
+#Read in Fama and French data
+French <- read.csv(url("http://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_CSV.zip"))
+
+temp <- tempfile()
+download.file("http://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_CSV.zip",temp, mode="wb")
+unzip(temp, "F-F_Research_Data_Factors.CSV")
+
+French <- readLines("F-F_Research_Data_Factors.CSV")
+ix <- which(French == "")
+French <- read.csv(text = French[ix[1]:ix[2]])
+French <- subset(French, X >= 201202 & X <= 201612) #Here we select only the months we want
+
+
+French <- apply(French, 2, rev) #flipping the df 180 degrees
+GOOG <- apply(GOOG, 2, rev)
+
+
+#Necessary calculations, restructuring and renaming variables before running OLS
+#df <- as.data.frame(French[, "Mkt.RF"])
+df <- subset(French, select = c("Mkt.RF", "SMB", "HML", "RF"))
+colnames(df) <- c("Mkt.RF2", "SMB2", "HML2", "RF2")
+#colnames(df) <- c("Mkt.RF2")
+#df <- as.data.frame(df$Mkt.RF2 / 100)
+df <- as.data.frame(df / 100)
+#colnames(df) <- "Mkt.RF2"
+
+French <- cbind(French, df)
+#French <- subset(French, select = - Mkt.RF)
+French <- subset(French, select = c("X", "Mkt.RF2", "SMB2", "HML2", "RF2"))
+#French <- French[, c(1, 5, 2, 3, 4)]
+colnames(French)
+colnames(French) <- c("X", "Mkt.RF", "SMB", "HML", "RF")
+
+df <- cbind(GOOG, French)
+df$X <- NULL
+
+#We now have all our variables in one df and of correct proportions
+
+#Excess Monthly Return (Monthly return - Rf)
+df$ExcessReturns <- df$Returns - df$RF
+
+#Regression
+model <- lm(ExcessReturns ~ Mkt.RF + SMB + HML, data = df)
+summary(model)
+
+
+#Market risk coefficient (beta) from OLS
+Mkt.RF_coeff <- coef(summary(model))["Mkt.RF", "Estimate"]
+print(Mkt.RF_coeff)
+SMB_coeff <- coef(summary(model))["SMB", "Estimate"]
+print(SMB_coeff)
+HML_coeff <- coef(summary(model))["HML", "Estimate"]
+print(HML_coeff)
+
+
+#Calculating averages
+Mkt.RF_mean <- mean(df[,"Mkt.RF"])
+print(Mkt.RF_mean)
+SMB_mean <- mean(df[,"SMB"])
+print(SMB_mean)
+HML_mean <- mean(df[,"HML"])
+print(HML_mean)
+RF_mean <- mean(df[,"RF"])
+print(RF_mean)
+
+#Cost of equity
+monthlyCoC <- RF_mean + (Mkt.RF_coeff * Mkt.RF_mean) + (SMB_coeff * SMB_mean) + (HML_coeff * HML_mean)
+yearlyCoC <- monthlyCoC * 12
+in_percent <- yearlyCoC* 100
+print(in_percent)
+
